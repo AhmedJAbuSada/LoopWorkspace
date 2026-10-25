@@ -1,0 +1,57 @@
+name: 5. Build Before TestFlight Expiry
+run-name: Build Before TestFlight Expiry (${{ github.ref_name }})
+on:
+  workflow_dispatch:
+  schedule:
+    # Runs every Sunday, two hours after "4. Build Loop Auto"
+    - cron: "33 9 * * 0" # Sunday at UTC 9:33
+
+env:
+  # TestFlight builds expire after 90 days; rebuild once the last build is this old
+  MAX_BUILD_AGE_DAYS: 75
+
+jobs:
+  check_expiry:
+    name: Build if the last TestFlight build is about to expire
+    runs-on: ubuntu-26.04
+    permissions:
+      actions: write
+    steps:
+      # GitHub disables scheduled workflows after 60 days without repository activity,
+      # which would happen whenever upstream has no new release for two months
+      - name: Keep scheduled workflows enabled
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for workflow in build_loop_auto.yml build_before_expiry.yml; do
+            gh api -X PUT "repos/${{ github.repository }}/actions/workflows/$workflow/enable"
+          done
+
+      - name: Check age of last successful build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A successful run of either build workflow means a build was uploaded to TestFlight
+          # (runs of "4. Build Loop Auto" with nothing to build end as cancelled, not success)
+          last_build=$(
+            for workflow in build_loop_auto.yml build_loop.yml; do
+              gh run list --repo "${{ github.repository }}" --workflow "$workflow" \
+                --branch "${{ github.ref_name }}" --status success --limit 1 \
+                --json createdAt --jq '.[].createdAt'
+            done | sort | tail -n 1
+          )
+
+          if [ -z "$last_build" ]; then
+            echo "No successful build found."
+            age_days=$MAX_BUILD_AGE_DAYS
+          else
+            age_days=$(( ( $(date +%s) - $(date -d "$last_build" +%s) ) / 86400 ))
+            echo "Last successful build: $last_build ($age_days days ago)."
+          fi
+
+          if [ "$age_days" -ge "$MAX_BUILD_AGE_DAYS" ]; then
+            echo "Build is $age_days days old (limit $MAX_BUILD_AGE_DAYS) — starting 4. Build Loop Auto." | tee -a "$GITHUB_STEP_SUMMARY"
+            gh workflow run build_loop_auto.yml --repo "${{ github.repository }}" --ref "${{ github.ref_name }}"
+          else
+            echo "Build is $age_days days old (limit $MAX_BUILD_AGE_DAYS) — nothing to do." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
