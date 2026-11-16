@@ -3,7 +3,7 @@ run-name: Build Before TestFlight Expiry (${{ github.ref_name }})
 on:
   workflow_dispatch:
   schedule:
-    # Runs every Sunday, two hours after "4. Build Loop Auto"
+    # Runs every Sunday, two hours after "4. Build Loop"
     - cron: "33 9 * * 0" # Sunday at UTC 9:33
 
 env:
@@ -23,7 +23,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          for workflow in build_loop_auto.yml build_before_expiry.yml; do
+          for workflow in build_loop.yml build_before_expiry.yml; do
             gh api -X PUT "repos/${{ github.repository }}/actions/workflows/$workflow/enable"
           done
 
@@ -32,7 +32,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           # A successful run of either build workflow means a build was uploaded to TestFlight
-          # (runs of "4. Build Loop Auto" with nothing to build end as cancelled, not success)
+          # (scheduled runs with nothing to build end as cancelled, not success; build_loop_auto.yml is
+          # the pre-3.14.13 name of the build workflow, kept so older successful builds still count)
           last_build=$(
             for workflow in build_loop_auto.yml build_loop.yml; do
               gh run list --repo "${{ github.repository }}" --workflow "$workflow" \
@@ -50,8 +51,8 @@ jobs:
           fi
 
           if [ "$age_days" -ge "$MAX_BUILD_AGE_DAYS" ]; then
-            echo "Build is $age_days days old (limit $MAX_BUILD_AGE_DAYS) — starting 4. Build Loop Auto." | tee -a "$GITHUB_STEP_SUMMARY"
-            gh workflow run build_loop_auto.yml --repo "${{ github.repository }}" --ref "${{ github.ref_name }}"
+            echo "Build is $age_days days old (limit $MAX_BUILD_AGE_DAYS) — starting 4. Build Loop." | tee -a "$GITHUB_STEP_SUMMARY"
+            gh workflow run build_loop.yml --repo "${{ github.repository }}" --ref "${{ github.ref_name }}"
           else
             echo "Build is $age_days days old (limit $MAX_BUILD_AGE_DAYS) — nothing to do." | tee -a "$GITHUB_STEP_SUMMARY"
           fi
